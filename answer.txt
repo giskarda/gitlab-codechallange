@@ -1,0 +1,200 @@
+Q1: Tell me about a technical book you read recently, why you liked
+it, and why I should read it.
+
+A1: I recently read 'Building Microservices' from Sam Newman. Main
+reason why I read it was to understand / have the opinion of somebody
+who spent time thinking about the problem and I wanted to check if the
+author and me had the same conclusion on certain specific topic. The
+reason why I would recommend the book to other people is because it's
+super easy to jump on a bandwagon but most of the time what you are
+really doing is a leap of faith. The book helps you understand what
+are going to be the gains but also the struggles. In a very honest
+way.
+
+I went back recently to my 'discrete mathematics' college manual
+because most of the math behind machine learning is from your first
+year of CS and I need to refresh it.
+
+
+Q2: A service daemon in production has stopped responding to network
+requests. You receive an alert about the health of the service, and
+log in to the affected node to troubleshoot. How would you gather more
+information about the process and what it is doing? What are common
+reasons a process might appear to be locked up, and how would you rule
+out each possibility?
+
+A2: I'm assuming the alert is correct enough that a problem exists and
+exists only on the service daemon. I will assume that any single
+network step between the daemon and the client is working as
+expected. I will also assume the service has been removed from a
+load-balanced pool if the service was behind one. Assuming the service
+daemon is running on a bare metal box (i.e not a container inside a
+cgroup with limits) I would ask myself the following questions: Is the
+app running? I would use tool like ps to check if I can find the
+process. I would also use netstat to see if I can see the application
+open a socket on the port I think it should listen on. If so, am I
+allowed to open a connection to it? I would use tools like telnet to
+see if a basic TCP connection can be opened. If i have a health-check
+endpoint check if it tells me that only certain part are not working
+(imagine something like {'can connect to database': yes/no }. Curl
+would be my go to tool. If so am I allowed to send a request? if so do
+I get an answer. is it complete?. If I can, I will check the logs if
+something clear happened. If locally everything work, but still I got
+the alarm, is the machine allowed to send traffic outside the
+loop-back. I could check if by mistake some firewall rules have been
+deployed (iptables). If any of this is still true I would check the
+process table, ps, there is a clear indicator of high CPU usage (if so
+figure out if there is a way to get stack trace of the current
+operations), is the memory pretty high, get a memory dump. If none of
+this I would check if there are any kernel message that would indicate
+a resource starvation. If the application is sitting there doing
+nothing I can try to attach to it with `strace` and see if its stuck
+somewhere particularly (maybe a buffer waiting to be written on but a
+read never completed?). If I cant connect at all I can check the
+current open connection (files in Unix) for the current process and
+see if it hit the max allowed open fd (limits). I would also check the
+disk space and see if we hit max disk space and the application is
+waiting on write logs by example, or if I finished the amount of FD
+allowed on the FS. Both issue can be discovered by using df.
+
+Q3: A user on an ubuntu machine runs `curl http://gitlab.com` Please
+describe in as much detail as you can the lifecycle of the command and
+what happens in the kernel, over the network, and on GitLab servers
+before the command completes.
+
+A3: Assuming a standard shell, the first thing would be stat() the
+program to see if it exists, if it does and can be executed (+x bit)
+the shell will fork(2) and execve(2). Depending on how the FD on the
+father have been opened curl might inherit or not open files. I'm not
+sure what else is doing curl behind the scene but after reading
+parsing the cmdline it will issue a DNS request to resolve
+gitlab.com. In order to do so, it will check via glibc what are the
+providers for the host facility (found in nsswitch.conf(5)). Depending
+on what are the providers it might check for `files` /etc/hosts or
+/etc/resolv.conf if dns is specified. Assuming curl is going to use
+DNS it will issue a DNS query to the nameserver specified in
+/etc/resolv.conf. The protocol used by DNS is, generally, UDP
+therefore will open a UDP connection to the server and request the IP
+for gitlab.com. Once resolved the IP it will issue an HTTP request
+towards the IP. Contrary to the first UDP request the TCP request is a
+little bit more verbose, given the huge difference between the two
+protocol. Even the initial handshake (4 way) is going to take much
+more time. Given no port has been specified CURL will assume port 80
+and it will open a TCP connection (HTTP is implemented over TCP) to
+the IP on PORT 80 and it will issue in this particular case a GET
+request. Assuming a service is listening on that port and knows how to
+parse the HTTP (TEXT protocol) request it will send back a response
+(maybe). In this particular case the service will return a 302, an
+http status code to inform the client that the website moved
+temporarily to another location. Unfortunately curl without a specific
+option will not follow the redirect. By adding an extra switch '-L' it
+will follow the redirect and it will initiate a SSL connection on top
+of the HTTP (both use TCP and sit in the application layer but lets
+pretend SSL is a layer below HTTP) and instantiate a secure connection
+and on top of that normal HTTP traffic will run on.
+
+
+Q4: One of the current challenges we are facing lies in storage
+capacity. Describe in as much detail as you can how you would face
+this challenge, where do you think the main bottlenecks could be and
+finally what actions would you take to understand the problem and to
+finally deliver an infrastructure that would support our growth.
+
+A4: I would assume that the storage at Gitlab is minely used for read
+over than write. Although specific part of the infrastructure might be
+write intense (CI?) generally speaking data should be read more often
+than written. I would say that any possible solution should take in
+consideration that a degrade of write capacity is less important than
+a loss in capacity for the read operation. You want to make sure you
+have very low latency while reading and acceptable latency while try
+to write. Given that we would need to figure out how to do data
+replication. Assuming the above we can imagine that on the total
+number of disks 40% are used for write operation and 60% for
+read. That would require a decent algorithm that help replicating data
+on servers to ensure we can maximize the throughput both on the
+network and also on the data bus. This should be easy to determine on
+an intranet but that might start to be complicated if we want to bring
+the data closer to the user. Enter the network and all the issue that
+can rise. Depending on the SLA we can agree on a logic of best effort
+(or eventually consistent). Possible problem would be incosinstency
+between what was sent and received. Lost connection between the sender
+/ receiver.  We could also have a layer of fast access disk (ssd) that
+preread repository that are accessed more often then others (bcache?).
+Ensuring capacity planning is hard to estimate without real data but
+latency from the disk would be a good indicator as IOPS. Metrics are
+an important factor to make all those decisions.
+
+I would also think about storage as a logical entity and try to avoid
+thinking in terms of single disk capacity but as a whole logical block
+device. I would use LVM (at the minimum) or look into more complicated
+solution as cephs.
+
+On top of this we would need to think about long term storage and
+disaster recovery.  I would assume that we would require 3 types of
+data backup. 1) a delayed replica (this might be either by time or by
+commits in case of git repository) 2) daily backup very close from the
+source 3) a weekly and monthly backup stored in very slow storage.
+
+
+Q5: Write a program, topN, that given an arbitrarily large file and a
+number, N, containing individual numbers on each line (e.g. 200Gb
+file), will output the largest N numbers, highest first. Tell me about
+the run time/space complexity of it, and whether you think there's
+room for improvement in your approach.
+
+Please see attached code as implementation reference.
+
+I would say we have two different problem here that needs to be
+tackled and have both a specific complexity. The first is read a
+'large' file. And this unfortunately will have a complexity of O(n)
+because no matter what we will always have to read every single line to
+extract the number. Different read strategies can help speed up the
+process (read specific amount of chucks) but this might require also
+writing a smart parsers to, by example, understand new lines. Add
+account for non complete data.
+
+The second problem is a sorting problem. Depending on the the N
+provided there are different techniques that can be used.
+
+By example:
+
+if the N is relatively short lets say the top 10 number, the attached
+solution would take 50 second to extract numbers from a file size of
+650MB.
+
+A trivial use of sort -r | head -n 10 takes around 15 minutes.
+
+With a N of 100, the time is triplicated (150s).But still better than
+the trivial implementation.
+
+Although if we ask for the first 1000 (two order of magnitude from the
+first try) it will take over 18 minutes. The trivial sort | head
+implementation in that specific (and above topN) case would be faster.
+
+Although it looks pretty linear. Sort the first 10000 would take
+slightly less than 3 hours.
+
+The Golang solution with the same algorithm would take 26 second.
+
+After further optimization I was able to lower down the python code
+from 18 minutes to 41 seconds
+
+My approach favors memory utilization (and CPU up to certain extent)
+for lower N, the complexity, O(n), is something that we can afford
+easily and we get a huge save in memory. Higher N the CPU / time spent
+is significant to the point that if we can sort the list in one go
+might be faster (but again it would consume more memory)
+
+For very large data, I would assume that the only good way to write a
+topN would be look into map/reduce.
+
+Possible approach for larger N would be bisect the list in half pickup
+the upper part and check if the number is larger than the lower bound
+or not and keep bisecting until a proper position has been found.
+
+Unfortunately I don't think there is a generic solution that would
+have fair time on each single possible case. An analisys of the
+dataset is required to perform the best strategy.
+
+All of this tests have been run on a Apple MBP 3.1 Ghz i7 with 16G of
+ram
