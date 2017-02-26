@@ -1,19 +1,18 @@
 Q1: Tell me about a technical book you read recently, why you liked
 it, and why I should read it.
 
-A1: I recently read 'Building Microservices' from Sam Newman. Main
+A1: I recently read 'Building Microservices' from Sam Newman, the main
 reason why I read it was to understand / have the opinion of somebody
 who spent time thinking about the problem and I wanted to check if the
-author and me had the same conclusion on certain specific topic. The
-reason why I would recommend the book to other people is because it's
-super easy to jump on a bandwagon but most of the time what you are
-really doing is a leap of faith. The book helps you understand what
-are going to be the gains but also the struggles. In a very honest
-way.
+author and I had the same conclusion on certain specific topic. I
+would recommend the book to other people because it's super easy to
+jump on a bandwagon but most of the time what you are really doing is
+a leap of faith. The book helps you understand what are going to be
+the gains but also the struggles. In a very honest way.
 
 I went back recently to my 'discrete mathematics' college manual
 because most of the math behind machine learning is from your first
-year of CS and I need to refresh it.
+year of CS and I needed a refresher on it.
 
 
 Q2: A service daemon in production has stopped responding to network
@@ -23,34 +22,35 @@ information about the process and what it is doing? What are common
 reasons a process might appear to be locked up, and how would you rule
 out each possibility?
 
-A2: I'm assuming the alert is correct enough that a problem exists and
-exists only on the service daemon. I will assume that any single
-network step between the daemon and the client is working as
-expected. I will also assume the service has been removed from a
-load-balanced pool if the service was behind one. Assuming the service
-daemon is running on a bare metal box (i.e not a container inside a
-cgroup with limits) I would ask myself the following questions: Is the
-app running? I would use tool like ps to check if I can find the
-process. I would also use netstat to see if I can see the application
-open a socket on the port I think it should listen on. If so, am I
-allowed to open a connection to it? I would use tools like telnet to
-see if a basic TCP connection can be opened. If i have a health-check
-endpoint check if it tells me that only certain part are not working
-(imagine something like {'can connect to database': yes/no }. Curl
-would be my go to tool. If so am I allowed to send a request? if so do
-I get an answer. is it complete?. If I can, I will check the logs if
-something clear happened. If locally everything work, but still I got
-the alarm, is the machine allowed to send traffic outside the
-loop-back. I could check if by mistake some firewall rules have been
-deployed (iptables). If any of this is still true I would check the
-process table, ps, there is a clear indicator of high CPU usage (if so
-figure out if there is a way to get stack trace of the current
-operations), is the memory pretty high, get a memory dump. If none of
-this I would check if there are any kernel message that would indicate
-a resource starvation. If the application is sitting there doing
-nothing I can try to attach to it with `strace` and see if its stuck
-somewhere particularly (maybe a buffer waiting to be written on but a
-read never completed?). If I cant connect at all I can check the
+A2: A few assumptions: the alert is correct enough that a problem
+exists and exists only on the service daemon, and also I will assume
+that any single network step between the daemon and the client is
+working as expected. First step would be to verify the service has
+been removed from a load-balanced pool if the service was behind
+one. Assuming the service daemon is running on a bare metal box (i.e
+not a container inside a cgroup with limits) I would ask myself the
+following questions: Is the app running? I would use tool like ps to
+check if I can find the process. I would also use netstat to see if I
+can see the application opened a socket on the port I think it should
+listen on. If so, am I allowed to open a connection to it? I would use
+tools like telnet to see if a basic TCP connection can be opened. If I
+have a health-check endpoint, I would check to see if it tells me that
+only certain parts are not working (imagine something like {'can
+connect to database': yes/no }. Curl would be my go to tool. If so am
+I allowed to send a request? If so do I get an answer. Is the answer
+complete? If I can, I will check the logs if something clear
+happened. If locally everything work, but still I got the alarm, is
+the machine allowed to send traffic outside the loop-back ip address?
+I could check if by mistake some firewall rules have been deployed
+(iptables). If any of this is still true I would check the process
+table, ps, there is a clear indicator of high CPU usage (if so figure
+out if there is a way to get stack trace of the current operations),
+is the memory pretty high, get a memory dump. If none of this leads to
+any insight, I would check if there are any kernel message that would
+indicate a resource starvation. If the application is sitting there
+doing nothing I can try to attach to it with `strace` and see if its
+stuck somewhere particularly (maybe a buffer waiting to be written on
+but a read never completed?). If I cant connect at all I can check the
 current open connection (files in Unix) for the current process and
 see if it hit the max allowed open fd (limits). I would also check the
 disk space and see if we hit max disk space and the application is
@@ -62,7 +62,7 @@ describe in as much detail as you can the lifecycle of the command and
 what happens in the kernel, over the network, and on GitLab servers
 before the command completes.
 
-A3: Assuming a standard shell, the first thing would be stat() the
+A3: Assuming a standard shell, the first thing would be stat(2) the
 program to see if it exists, if it does and can be executed (+x bit)
 the shell will fork(2) and execve(2). Depending on how the FD on the
 father have been opened curl might inherit or not open files. I'm not
@@ -100,26 +100,26 @@ this challenge, where do you think the main bottlenecks could be and
 finally what actions would you take to understand the problem and to
 finally deliver an infrastructure that would support our growth.
 
-A4: I would assume that the storage at Gitlab is minely used for read
-over than write. Although specific part of the infrastructure might be
-write intense (CI?) generally speaking data should be read more often
-than written. I would say that any possible solution should take in
+A4: I would assume that the storage at Gitlab is mainly used for read
+over writes. Although specific part of the infrastructure might be
+write intense (CI?), generally speaking data should be read more often
+than written. I would say that any possible solution should take into
 consideration that a degrade of write capacity is less important than
-a loss in capacity for the read operation. You want to make sure you
-have very low latency while reading and acceptable latency while try
-to write. Given that we would need to figure out how to do data
-replication. Assuming the above we can imagine that on the total
-number of disks 40% are used for write operation and 60% for
-read. That would require a decent algorithm that help replicating data
-on servers to ensure we can maximize the throughput both on the
-network and also on the data bus. This should be easy to determine on
-an intranet but that might start to be complicated if we want to bring
-the data closer to the user. Enter the network and all the issue that
-can rise. Depending on the SLA we can agree on a logic of best effort
-(or eventually consistent). Possible problem would be incosinstency
-between what was sent and received. Lost connection between the sender
-/ receiver.  We could also have a layer of fast access disk (ssd) that
-preread repository that are accessed more often then others (bcache?).
+a loss in capacity and the response time for the read operation. You
+want to make sure you have very low latency while reading and
+acceptable latency while try to write. Given that the challenge would
+be to figure out how to do data replication. Assuming the above, we
+can imagine that on the total number of disks 40% are used for write
+operation and 60% for read. That would require a decent algorithm that
+help replicating data on servers to ensure we can maximize the
+throughput both on the network and also on the data bus. This should
+be easy to determine on an intranet but that might start to be
+complicated if we want to bring the data closer to the user. ]
+Possible problems could be inconsistency between what was sent and
+received. Lost connection between the sender / receiver.
+
+We could also have a layer of fast access disk (ssd) that pre-read a
+repository that are accessed more often then others (bcache?).
 Ensuring capacity planning is hard to estimate without real data but
 latency from the disk would be a good indicator as IOPS. Metrics are
 an important factor to make all those decisions.
@@ -147,8 +147,8 @@ Please see attached code as implementation reference.
 I would say we have two different problem here that needs to be
 tackled and have both a specific complexity. The first is read a
 'large' file. And this unfortunately will have a complexity of O(n)
-because no matter what we will always have to read every single line to
-extract the number. Different read strategies can help speed up the
+because no matter what we will always have to read every single line
+to extract the number. Different read strategies can help speed up the
 process (read specific amount of chucks) but this might require also
 writing a smart parsers to, by example, understand new lines. Add
 account for non complete data.
@@ -174,7 +174,7 @@ implementation in that specific (and above topN) case would be faster.
 Although it looks pretty linear. Sort the first 10000 would take
 slightly less than 3 hours.
 
-The Golang solution with the same algorithm would take 26 second.
+The Golang solution with the same algorithm takes 26 seconds.
 
 After further optimization I was able to lower down the python code
 from 18 minutes to 41 seconds
@@ -193,7 +193,8 @@ the upper part and check if the number is larger than the lower bound
 or not and keep bisecting until a proper position has been found.
 
 Unfortunately I don't think there is a generic solution that would
-have fair time on each single possible case. An analisys of the
+have fair time on each single possible case. An analysis of the
+
 dataset is required to perform the best strategy.
 
 All of this tests have been run on a Apple MBP 3.1 Ghz i7 with 16G of
